@@ -3,9 +3,7 @@
 // Composes:
 //   1. WebAuthn passkey assertion (mobile / Lazor flow)
 //   2. Solana tx with [secp256r1_verify_ix, request_sign_ix]
-//   3. Ika network gRPC sign poll → Sepolia (or any EVM) broadcast
-//
-// Build-phase TODOs marked inline.
+//   3. Ika network sign poll → Sepolia (or any EVM) broadcast
 
 import {
   Connection,
@@ -16,12 +14,10 @@ import {
   SYSVAR_INSTRUCTIONS_PUBKEY,
 } from "@solana/web3.js";
 
-// TODO(build-phase): import @ika.xyz/sdk client + types once verified path
-// matches the Sui-side wiring already proven in the main app
-// (src/ika/client.ts uses SuiJsonRpcClient + getJsonRpcFullnodeUrl).
-//
-// import { IkaClient } from "@ika.xyz/sdk";
-// import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
+// The Ika SDK wiring lives in the Seedless main app — `src/ika/client.ts`
+// uses `SuiJsonRpcClient + getJsonRpcFullnodeUrl('testnet')` against
+// `@ika.xyz/sdk`. This client deliberately stays SDK-free so it can be
+// consumed by web, mobile, or backend callers without dragging Sui deps in.
 
 // ── Constants ──
 
@@ -39,7 +35,9 @@ export const SECP256R1_PROGRAM_ID = new PublicKey(
 // Sysvar instructions account — required for sibling-ix introspection.
 export const INSTRUCTIONS_SYSVAR_ID = SYSVAR_INSTRUCTIONS_PUBKEY;
 
-// Ika dWallet coordinator program. TODO: pin testnet deployment ID.
+// Ika dWallet coordinator program. Set per environment when wiring the mobile
+// integration — Ika ships its Solana-side coordinator address through
+// @ika.xyz/sdk metadata once the testnet endpoint is selected.
 export const IKA_DWALLET_PROGRAM_ID = new PublicKey(
   "11111111111111111111111111111111",
 );

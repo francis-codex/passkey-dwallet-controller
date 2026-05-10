@@ -34,8 +34,11 @@ use pinocchio_system::instructions::CreateAccount;
 entrypoint!(process_instruction);
 pinocchio::nostd_panic_handler!();
 
-// Replace post-deploy with the program's deployed address.
-pub const ID: Address = Address::new_from_array([7u8; 32]);
+// Deployed on Solana devnet: 3xYHGYP24wH75tB1U3tn2RoQHcgZLkjuWTT4snWbv9zv
+pub const ID: Address = Address::new_from_array([
+    43, 241, 175, 243, 63, 238, 86, 41, 119, 27, 213, 201, 61, 104, 176, 106,
+    32, 6, 177, 60, 198, 181, 58, 7, 210, 52, 113, 162, 29, 36, 141, 7,
+]);
 
 // ── Discriminators ──
 const CONTROLLER_DISCRIMINATOR: u8 = 1;
