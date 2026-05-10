@@ -4,7 +4,10 @@ Passkey-gated Ika dWallet message approval for Solana — built for Frontier Hac
 
 **Submission target:** top-3 finish.
 **Deadline:** Sun May 11 2026.
-**Status (May 8):** scaffolded. Build phase: Sat May 9. Devnet deploy + e2e: Sun May 10 AM.
+**Status:** ✅ Compiled with platform-tools v1.54 (cargo 1.89). ✅ Deployed to Solana devnet.
+
+- **Program ID:** `3xYHGYP24wH75tB1U3tn2RoQHcgZLkjuWTT4snWbv9zv`
+- **Deploy tx:** [solscan](https://solscan.io/tx/2aNbhbwAFGa1YHfv3sQCnAWtmjw5yhcc5UTLMX7k3mF2egvA8PtWMrCKntNtH6GuWEt2vd2L3zAx8ZQigJK3kGmS?cluster=devnet)
 
 ---
 
