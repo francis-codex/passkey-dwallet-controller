@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "programs/passkey-dwallet-controller",
+]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Seedless Labs"]
+license = "BSD-3-Clause-Clear"
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+# Ika SDK (path dep into vendored ika-pre-alpha)
+ika-dwallet-pinocchio = { path = "../Code/ika-pre-alpha/chains/solana/program-sdk/pinocchio" }
+ika-system-types      = { path = "../Code/ika-pre-alpha/chains/solana/sdk/types" }
+ika-dwallet-types     = { path = "../Code/ika-pre-alpha/crates/ika-dwallet-types" }
+
+# Pinocchio
+pinocchio        = { version = "^0.10", features = ["cpi", "copy"] }
+pinocchio-system = "^0.5"
+
+# Solana types
+solana-pubkey      = "^4.0"
+solana-address     = { version = "^2.4", features = ["curve25519"] }
+solana-program     = "2.2"
+solana-instruction = "^3.2"
+
+# Testing
+mollusk-svm        = { version = "^0.11", features = ["inner-instructions"] }
+solana-account     = "^3.2"
+solana-keypair     = "^3.0"
+solana-signer      = "^3.0"
+solana-transaction = { version = "^3.0", features = ["bincode"] }
+solana-hash        = "^3.0"
+
+[workspace.lints.clippy]
+arithmetic_side_effects = "deny"

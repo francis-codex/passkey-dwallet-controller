@@ -1,0 +1,7 @@
+target/
+Cargo.lock
+client/dist/
+client/node_modules/
+*.so
+*-keypair.json
+.DS_Store
