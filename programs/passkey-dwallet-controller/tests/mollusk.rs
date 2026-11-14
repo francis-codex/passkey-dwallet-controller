@@ -113,6 +113,7 @@ struct Init {
     dwallet_account: Account,
     proof_message: Vec<u8>,
     owner_signs: bool,
+    controller_state: Account,
 }
 
 impl Init {
@@ -120,7 +121,7 @@ impl Init {
         let owner = Pubkey::new_unique();
         let dwallet = Pubkey::new_unique();
         let (controller, bump) =
-            Pubkey::find_program_address(&[b"controller", owner.as_ref()], &program_id());
+            Pubkey::find_program_address(&[b"controller", dwallet.as_ref()], &program_id());
         let mut proof_message = INIT_DOMAIN.to_vec();
         proof_message.extend_from_slice(owner.as_ref());
         proof_message.extend_from_slice(dwallet.as_ref());
@@ -134,6 +135,7 @@ impl Init {
             dwallet_account: dwallet_account(&owner, &ika()),
             proof_message,
             owner_signs: true,
+            controller_state: Account::default(),
         }
     }
 
@@ -159,7 +161,7 @@ impl Init {
         mollusk().process_instruction(
             &ix,
             &[
-                (self.controller, Account::default()),
+                (self.controller, self.controller_state.clone()),
                 (self.dwallet, self.dwallet_account.clone()),
                 (self.owner, funded()),
                 (self.payer, funded()),
@@ -184,6 +186,47 @@ fn init_controller_happy_path() {
     assert_eq!(&ctrl.data[34..67], &t.passkey);
     assert_eq!(&ctrl.data[67..99], t.dwallet.as_ref());
     assert_eq!(ctrl.data[99], t.bump);
+}
+
+#[test]
+fn init_claims_a_prefunded_controller_pda() {
+    // byfor8 NEW-3: dust sent to the PDA first must not block registration.
+    let mut t = Init::new();
+    t.controller_state = Account { lamports: 1, ..Account::default() };
+    let res = t.run();
+    assert_eq!(res.raw_result, Ok(()));
+    let ctrl = res.get_account(&t.controller).expect("controller");
+    assert_eq!(ctrl.owner, program_id());
+    assert_eq!(ctrl.data.len(), CONTROLLER_LEN);
+    assert_eq!(&ctrl.data[67..99], t.dwallet.as_ref());
+}
+
+#[test]
+fn init_lets_the_new_authority_replace_a_stale_controller() {
+    // byfor8 NEW-2: the dWallet changed hands; the old owner's binding
+    // (another passkey, another owner) is overwritten by the new authority.
+    let mut t = Init::new();
+    let old_owner = Pubkey::new_unique();
+    let mut stale = vec![0u8; CONTROLLER_LEN];
+    stale[0] = 1;
+    stale[1] = 2;
+    stale[2..34].copy_from_slice(old_owner.as_ref());
+    stale[34..67].copy_from_slice(&passkey(3));
+    stale[67..99].copy_from_slice(t.dwallet.as_ref());
+    stale[99] = t.bump;
+    t.controller_state = Account { lamports: 2_000_000, data: stale, owner: program_id(), ..Account::default() };
+    let res = t.run();
+    assert_eq!(res.raw_result, Ok(()));
+    let ctrl = res.get_account(&t.controller).expect("controller");
+    assert_eq!(&ctrl.data[2..34], t.owner.as_ref());
+    assert_eq!(&ctrl.data[34..67], &t.passkey);
+}
+
+#[test]
+fn init_rejects_an_account_owned_by_another_program() {
+    let mut t = Init::new();
+    t.controller_state = Account { lamports: 1, data: vec![0; 8], owner: Pubkey::new_unique(), ..Account::default() };
+    assert_eq!(t.run().raw_result, Err(InstructionError::AccountAlreadyInitialized));
 }
 
 #[test]
@@ -279,7 +322,7 @@ impl Sign {
         let owner = Pubkey::new_unique();
         let dwallet = Pubkey::new_unique();
         let (controller, bump) =
-            Pubkey::find_program_address(&[b"controller", owner.as_ref()], &program_id());
+            Pubkey::find_program_address(&[b"controller", dwallet.as_ref()], &program_id());
         let (cpi_authority, cpi_bump) =
             Pubkey::find_program_address(&[CPI_AUTHORITY_SEED], &program_id());
         let (digest, user_pubkey) = ([5u8; 32], [6u8; 32]);

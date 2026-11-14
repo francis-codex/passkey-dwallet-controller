@@ -61,7 +61,7 @@ PasskeyDWalletController is that authority. It's the missing piece between a mob
 
 Two instructions, both verified entirely on-chain:
 
-**`init_controller`** registers a passkey + dWallet binding. The Controller PDA (`["controller", owner]`) stores the user's 33-byte compressed P-256 pubkey and the dWallet account address. The owner signing must be the dWallet's current authority, the dWallet must be owned by the Ika dWallet program, the PDA bump must be canonical, and the passkey must sign `"passkey-dwallet-controller:init" || owner || dwallet` in a sibling secp256r1 instruction, which proves the key is a real P-256 point the registrant controls. Dust-rent for the account is ~0.0016 SOL.
+**`init_controller`** registers a passkey + dWallet binding. The Controller PDA (`["controller", dwallet]`, one per dWallet) stores the user's 33-byte compressed P-256 pubkey and the dWallet account address. The owner signing must be the dWallet's current authority, the dWallet must be owned by the Ika dWallet program, the PDA bump must be canonical, and the passkey must sign `"passkey-dwallet-controller:init" || owner || dwallet` in a sibling secp256r1 instruction, which proves the key is a real P-256 point the registrant controls. Dust-rent for the account is ~0.0016 SOL.
 
 **`request_sign`** is the gate. It first requires the Controller to be owned by this program and to be the canonical PDA for the owner it stores, the dWallet to be the one that Controller was registered with, and the Ika program, caller program, system program and CPI authority accounts to be the pinned ones. It then takes a 32-byte message digest, introspects the sibling Secp256r1SigVerify instruction in the same transaction, and verifies five things on-chain:
 
