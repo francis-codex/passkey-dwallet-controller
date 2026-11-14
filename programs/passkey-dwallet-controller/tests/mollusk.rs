@@ -179,6 +179,7 @@ fn init_controller_happy_path() {
     assert_eq!(ctrl.owner, program_id());
     assert_eq!(ctrl.data.len(), CONTROLLER_LEN);
     assert_eq!(ctrl.data[0], 1);
+    assert_eq!(ctrl.data[1], 2);
     assert_eq!(&ctrl.data[2..34], t.owner.as_ref());
     assert_eq!(&ctrl.data[34..67], &t.passkey);
     assert_eq!(&ctrl.data[67..99], t.dwallet.as_ref());
@@ -257,7 +258,7 @@ struct Sign {
 fn controller_account(owner: &Pubkey, dwallet: &Pubkey, bump: u8, program: &Pubkey) -> Account {
     let mut data = vec![0u8; CONTROLLER_LEN];
     data[0] = 1;
-    data[1] = 1;
+    data[1] = 2;
     data[2..34].copy_from_slice(owner.as_ref());
     data[34..67].copy_from_slice(&passkey(9));
     data[67..99].copy_from_slice(dwallet.as_ref());
@@ -356,6 +357,15 @@ fn sign_rejects_controller_not_owned_by_program() {
     let mut t = Sign::new();
     t.controller_account.owner = Pubkey::new_unique();
     assert_eq!(t.run().raw_result, Err(InstructionError::IllegalOwner));
+}
+
+#[test]
+fn sign_rejects_legacy_v1_controller() {
+    // A controller written by the pre-fix init_controller has version 1 but is
+    // otherwise byte-identical; it must not survive an in-place upgrade.
+    let mut t = Sign::new();
+    t.controller_account.data[1] = 1;
+    assert_eq!(t.run().raw_result, Err(InstructionError::InvalidAccountData));
 }
 
 #[test]

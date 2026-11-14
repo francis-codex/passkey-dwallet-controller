@@ -42,6 +42,11 @@ pub const ID: Address = Address::new_from_array([
 
 // ── Discriminators ──
 const CONTROLLER_DISCRIMINATOR: u8 = 1;
+/// Controllers written by the old `init_controller` carry version 1 and were
+/// created without the dWallet-authority and passkey-possession checks.
+/// `request_sign` only accepts this version, so an in-place upgrade cannot
+/// carry a controller made by the old code forward.
+const CONTROLLER_VERSION: u8 = 2;
 
 // ── Account sizes ──
 const CONTROLLER_DATA_LEN: usize = 114;
@@ -221,7 +226,7 @@ fn init_controller(
 
     let ctrl_data = unsafe { controller_account.borrow_unchecked_mut() };
     ctrl_data[0] = CONTROLLER_DISCRIMINATOR;
-    ctrl_data[1] = 1; // version
+    ctrl_data[1] = CONTROLLER_VERSION;
     ctrl_data[CTRL_OWNER..CTRL_OWNER + 32].copy_from_slice(owner_key);
     ctrl_data[CTRL_PASSKEY_PUBKEY..CTRL_PASSKEY_PUBKEY + 33]
         .copy_from_slice(&passkey_pubkey);
@@ -301,7 +306,10 @@ fn request_sign(
     let mut registered_dwallet = [0u8; 32];
     {
         let ctrl_data = unsafe { controller_account.borrow_unchecked() };
-        if ctrl_data.len() < CONTROLLER_LEN || ctrl_data[0] != CONTROLLER_DISCRIMINATOR {
+        if ctrl_data.len() < CONTROLLER_LEN
+            || ctrl_data[0] != CONTROLLER_DISCRIMINATOR
+            || ctrl_data[1] != CONTROLLER_VERSION
+        {
             return Err(ProgramError::InvalidAccountData);
         }
         let (expected_controller, _) = Address::find_program_address(
