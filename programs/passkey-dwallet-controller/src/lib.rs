@@ -22,7 +22,7 @@
 
 extern crate alloc;
 
-use ika_dwallet_pinocchio::DWalletContext;
+use ika_dwallet_pinocchio::{DWalletContext, CPI_AUTHORITY_SEED};
 use pinocchio::{
     cpi::{Seed, Signer},
     entrypoint,
@@ -65,9 +65,29 @@ pub const INSTRUCTIONS_SYSVAR_ID: Address = Address::new_from_array([
     193, 36, 198, 143, 33, 86, 117, 165, 219, 186, 203, 95, 8, 0, 0, 0,
 ]);
 
+/// Ika dWallet program: `87W54kGYFQ1rgWqMeu4XTPHWXWmXSQCcjm8vCTfiq1oY`.
+pub const IKA_DWALLET_PROGRAM_ID: Address = Address::new_from_array([
+    105, 172, 41, 185, 50, 32, 159, 61, 21, 16, 154, 74, 112, 129, 218, 65,
+    5, 104, 52, 48, 240, 90, 178, 50, 121, 140, 177, 1, 215, 36, 144, 91,
+]);
+
+/// System program: `11111111111111111111111111111111`.
+const SYSTEM_PROGRAM_ID: Address = Address::new_from_array([0u8; 32]);
+
+// ── Ika dWallet account layout (the fields this program reads) ──
+const DWALLET_DISCRIMINATOR: u8 = 2;
+const DWALLET_AUTHORITY: usize = 2; // 32 bytes
+const DWALLET_MIN_LEN: usize = 34;
+
+/// Domain tag on the message the passkey signs to register itself.
+pub const INIT_DOMAIN: &[u8] = b"passkey-dwallet-controller:init";
+/// `INIT_DOMAIN || owner(32) || dwallet(32)`.
+pub const INIT_MESSAGE_LEN: usize = 31 + 32 + 32;
+/// `message_digest(32) || user_pubkey(32) || signature_scheme(2 LE) || dwallet(32)`.
+pub const SIGN_MESSAGE_LEN: usize = 32 + 32 + 2 + 32;
+
 // SIMD-0048 layout constants
 const SECP256R1_PUBKEY_LEN: usize = 33;
-const SECP256R1_DIGEST_LEN: usize = 32;
 /// Inside SignatureOffsets, this means "blob is in the same ix's own data".
 const CURRENT_IX_SENTINEL: u16 = u16::MAX;
 
@@ -94,24 +114,32 @@ pub fn process_instruction(
 
 /// Register a passkey pubkey + dWallet binding for an owner.
 ///
+/// The owner must be the dWallet's current authority, and the passkey must
+/// sign `INIT_DOMAIN || owner || dwallet` in a sibling secp256r1 ix. That
+/// proves the key is a real P-256 point the registrant controls. Hand the
+/// dWallet authority to this program's CPI authority only after this ix.
+///
 /// # Instruction Data
-/// `[passkey_pubkey(33), bump(1)]` = 34 bytes
+/// `[passkey_pubkey(33), bump(1), secp256r1_ix_index(1)]` = 35 bytes
 ///
 /// # Accounts
 /// 0. `[writable]`         Controller PDA (seeds: `["controller", owner]`)
-/// 1. `[readonly]`         dWallet account
-/// 2. `[signer]`           Owner
+/// 1. `[readonly]`         dWallet account (owned by the Ika dWallet program)
+/// 2. `[signer]`           Owner (the dWallet's current authority)
 /// 3. `[writable, signer]` Payer
 /// 4. `[readonly]`         System program
+/// 5. `[readonly]`         Sysvar instructions account
 fn init_controller(
     program_id: &Address,
     accounts: &[AccountView],
     data: &[u8],
 ) -> ProgramResult {
-    if data.len() < 34 {
+    if data.len() < 35 {
         return Err(ProgramError::InvalidInstructionData);
     }
-    let [controller_account, dwallet, owner, payer, _system_program, ..] = accounts else {
+    let [controller_account, dwallet, owner, payer, system_program, sysvar_instructions, ..] =
+        accounts
+    else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
@@ -121,13 +149,60 @@ fn init_controller(
     if !payer.is_signer() || !payer.is_writable() {
         return Err(ProgramError::MissingRequiredSignature);
     }
+    if system_program.address().as_array() != SYSTEM_PROGRAM_ID.as_array() {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    if sysvar_instructions.address().as_array() != INSTRUCTIONS_SYSVAR_ID.as_array() {
+        return Err(ProgramError::InvalidAccountData);
+    }
 
     let mut passkey_pubkey = [0u8; 33];
     passkey_pubkey.copy_from_slice(&data[0..33]);
     let bump = data[33];
+    let secp256r1_ix_index = data[34];
+
+    // Compressed SEC1 point: the prefix is 0x02 or 0x03.
+    if passkey_pubkey[0] != 2 && passkey_pubkey[0] != 3 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+
+    // Controller must be the canonical PDA for this owner.
+    let owner_key = owner.address().as_array();
+    let (expected_controller, canonical_bump) =
+        Address::find_program_address(&[b"controller", owner_key.as_ref()], program_id);
+    if controller_account.address().as_array() != expected_controller.as_array()
+        || bump != canonical_bump
+    {
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    // dWallet must be a real Ika dWallet whose authority is the owner signing here.
+    if !dwallet.owned_by(&IKA_DWALLET_PROGRAM_ID) {
+        return Err(ProgramError::IllegalOwner);
+    }
+    {
+        let dw = unsafe { dwallet.borrow_unchecked() };
+        if dw.len() < DWALLET_MIN_LEN || dw[0] != DWALLET_DISCRIMINATOR {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        if &dw[DWALLET_AUTHORITY..DWALLET_AUTHORITY + 32] != owner_key.as_ref() {
+            return Err(ProgramError::IllegalOwner);
+        }
+    }
+
+    // Proof of possession: the passkey signs this exact registration.
+    let mut init_message = [0u8; INIT_MESSAGE_LEN];
+    init_message[..31].copy_from_slice(INIT_DOMAIN);
+    init_message[31..63].copy_from_slice(owner_key);
+    init_message[63..95].copy_from_slice(dwallet.address().as_array());
+    verify_secp256r1_sibling_ix(
+        sysvar_instructions,
+        secp256r1_ix_index,
+        &passkey_pubkey,
+        &init_message,
+    )?;
 
     let bump_byte = [bump];
-    let owner_key = owner.address().as_array();
     let signer_seeds = [
         Seed::from(b"controller" as &[u8]),
         Seed::from(owner_key.as_ref()),
@@ -158,7 +233,12 @@ fn init_controller(
 }
 
 /// Approve a message digest for signing iff the sibling secp256r1 verify ix
-/// attests the registered passkey signed it.
+/// attests the registered passkey signed
+/// `message_digest || user_pubkey || signature_scheme || dwallet`.
+///
+/// The controller must be this program's canonical PDA for its stored owner,
+/// and the dWallet must be the one it was registered with, so a controller
+/// can only ever approve for its own dWallet.
 ///
 /// # Instruction Data
 /// `[message_digest(32), user_pubkey(32), signature_scheme(2),
@@ -177,7 +257,7 @@ fn init_controller(
 /// 8. `[readonly]`         CPI authority PDA
 /// 9. `[readonly]`         dWallet program
 fn request_sign(
-    _program_id: &Address,
+    program_id: &Address,
     accounts: &[AccountView],
     data: &[u8],
 ) -> ProgramResult {
@@ -212,24 +292,67 @@ fn request_sign(
     let cpi_authority_bump = data[67];
     let secp256r1_ix_index = data[68];
 
-    // Verify controller integrity and read the registered passkey.
-    let ctrl_data = unsafe { controller_account.borrow_unchecked() };
-    if ctrl_data.len() < CONTROLLER_LEN || ctrl_data[0] != CONTROLLER_DISCRIMINATOR {
-        return Err(ProgramError::InvalidAccountData);
+    // Controller: owned by this program, right shape, and the canonical PDA
+    // for the owner it stores.
+    if !controller_account.owned_by(program_id) {
+        return Err(ProgramError::IllegalOwner);
     }
     let mut registered_passkey = [0u8; 33];
-    registered_passkey
-        .copy_from_slice(&ctrl_data[CTRL_PASSKEY_PUBKEY..CTRL_PASSKEY_PUBKEY + 33]);
+    let mut registered_dwallet = [0u8; 32];
+    {
+        let ctrl_data = unsafe { controller_account.borrow_unchecked() };
+        if ctrl_data.len() < CONTROLLER_LEN || ctrl_data[0] != CONTROLLER_DISCRIMINATOR {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        let (expected_controller, _) = Address::find_program_address(
+            &[b"controller", &ctrl_data[CTRL_OWNER..CTRL_OWNER + 32]],
+            program_id,
+        );
+        if controller_account.address().as_array() != expected_controller.as_array() {
+            return Err(ProgramError::InvalidSeeds);
+        }
+        registered_passkey
+            .copy_from_slice(&ctrl_data[CTRL_PASSKEY_PUBKEY..CTRL_PASSKEY_PUBKEY + 33]);
+        registered_dwallet.copy_from_slice(&ctrl_data[CTRL_DWALLET..CTRL_DWALLET + 32]);
+    }
 
-    // Verify sibling secp256r1 ix attests the registered passkey signed `message_digest`.
+    // dWallet: the one this controller was registered with, owned by Ika.
+    if dwallet.address().as_array() != &registered_dwallet {
+        return Err(ProgramError::InvalidArgument);
+    }
+    if !dwallet.owned_by(&IKA_DWALLET_PROGRAM_ID) {
+        return Err(ProgramError::IllegalOwner);
+    }
+
+    // Side accounts the CPI trusts.
+    if dwallet_program.address().as_array() != IKA_DWALLET_PROGRAM_ID.as_array()
+        || caller_program.address().as_array() != program_id.as_array()
+        || system_program.address().as_array() != SYSTEM_PROGRAM_ID.as_array()
+    {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    let (expected_cpi_authority, canonical_cpi_bump) =
+        Address::find_program_address(&[CPI_AUTHORITY_SEED], program_id);
+    if cpi_authority.address().as_array() != expected_cpi_authority.as_array()
+        || cpi_authority_bump != canonical_cpi_bump
+    {
+        return Err(ProgramError::InvalidSeeds);
+    }
     if sysvar_instructions.address().as_array() != INSTRUCTIONS_SYSVAR_ID.as_array() {
         return Err(ProgramError::InvalidAccountData);
     }
+
+    // The passkey signs everything the CPI forwards, not just the digest.
+    let mut signed_message = [0u8; SIGN_MESSAGE_LEN];
+    signed_message[..32].copy_from_slice(&message_digest);
+    signed_message[32..64].copy_from_slice(&user_pubkey);
+    signed_message[64..66].copy_from_slice(&signature_scheme.to_le_bytes());
+    signed_message[66..98].copy_from_slice(&registered_dwallet);
     verify_secp256r1_sibling_ix(
         sysvar_instructions,
         secp256r1_ix_index,
         &registered_passkey,
-        &message_digest,
+        &signed_message,
     )?;
 
     // CPI-approve the message on the Ika dWallet program.
@@ -262,7 +385,7 @@ fn request_sign(
 ///   2. exactly one signature is verified,
 ///   3. all blobs are in the secp256r1 ix's own data (not a different ix),
 ///   4. the signed pubkey equals `expected_pubkey` (registered passkey),
-///   5. the signed message equals `expected_digest`.
+///   5. the signed message equals `expected_message`, byte for byte.
 ///
 /// Returns `Ok(())` only if all five hold; the precompile's own success is
 /// implicit (the Solana runtime aborts the tx if the signature itself is bad).
@@ -270,7 +393,7 @@ fn verify_secp256r1_sibling_ix(
     sysvar_account: &AccountView,
     target_ix_index: u8,
     expected_pubkey: &[u8; SECP256R1_PUBKEY_LEN],
-    expected_digest: &[u8; SECP256R1_DIGEST_LEN],
+    expected_message: &[u8],
 ) -> ProgramResult {
     let sysvar = unsafe { sysvar_account.borrow_unchecked() };
 
@@ -353,11 +476,11 @@ fn verify_secp256r1_sibling_ix(
         return Err(ProgramError::InvalidArgument);
     }
 
-    // Message must be the digest exactly (32 bytes).
-    if msg_size != SECP256R1_DIGEST_LEN || msg_offset + SECP256R1_DIGEST_LEN > ix_data.len() {
+    // Message must be exactly the expected bytes.
+    if msg_size != expected_message.len() || msg_offset + msg_size > ix_data.len() {
         return Err(ProgramError::InvalidInstructionData);
     }
-    if &ix_data[msg_offset..msg_offset + SECP256R1_DIGEST_LEN] != expected_digest {
+    if &ix_data[msg_offset..msg_offset + msg_size] != expected_message {
         return Err(ProgramError::InvalidArgument);
     }
 
