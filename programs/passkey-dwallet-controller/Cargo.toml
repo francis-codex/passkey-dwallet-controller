@@ -24,3 +24,7 @@ workspace = true
 
 [lib]
 crate-type = ["cdylib", "lib"]
+
+# Host builds (tests, cargo check) need the curve check behind find_program_address.
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+solana-address = { workspace = true }

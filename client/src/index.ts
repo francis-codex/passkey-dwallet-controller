@@ -35,12 +35,14 @@ export const SECP256R1_PROGRAM_ID = new PublicKey(
 // Sysvar instructions account — required for sibling-ix introspection.
 export const INSTRUCTIONS_SYSVAR_ID = SYSVAR_INSTRUCTIONS_PUBKEY;
 
-// Ika dWallet coordinator program. Set per environment when wiring the mobile
-// integration — Ika ships its Solana-side coordinator address through
-// @ika.xyz/sdk metadata once the testnet endpoint is selected.
+// Ika dWallet program. The on-chain program pins this same id and rejects
+// any other program in the dWallet-program slot.
 export const IKA_DWALLET_PROGRAM_ID = new PublicKey(
-  "11111111111111111111111111111111",
+  "87W54kGYFQ1rgWqMeu4XTPHWXWmXSQCcjm8vCTfiq1oY",
 );
+
+// Domain tag on the message the passkey signs to register itself.
+export const INIT_DOMAIN = Buffer.from("passkey-dwallet-controller:init");
 
 // CPI authority seed — every caller program derives:
 //   find_program_address(["__ika_cpi_authority"], caller_program_id)
@@ -62,6 +64,34 @@ export function findCpiAuthority(): [PublicKey, number] {
   );
 }
 
+// ── Messages the passkey signs ──
+//
+// The program rebuilds these byte for byte and rejects anything else.
+
+/** Registration: `INIT_DOMAIN || owner || dwallet` (95 bytes). */
+export function buildInitMessage(owner: PublicKey, dwallet: PublicKey): Buffer {
+  return Buffer.concat([INIT_DOMAIN, owner.toBuffer(), dwallet.toBuffer()]);
+}
+
+/** Approval: `digest || userPubkey || signatureScheme(u16 LE) || dwallet` (98 bytes). */
+export function buildSignMessage(args: {
+  digest: Uint8Array;
+  userPubkey: Uint8Array;
+  signatureScheme: number;
+  dwallet: PublicKey;
+}): Buffer {
+  if (args.digest.length !== 32) throw new Error("digest must be 32 bytes");
+  if (args.userPubkey.length !== 32) throw new Error("user pubkey must be 32 bytes");
+  const scheme = Buffer.alloc(2);
+  scheme.writeUInt16LE(args.signatureScheme, 0);
+  return Buffer.concat([
+    Buffer.from(args.digest),
+    Buffer.from(args.userPubkey),
+    scheme,
+    args.dwallet.toBuffer(),
+  ]);
+}
+
 // ── Instruction builders ──
 
 export interface InitControllerArgs {
@@ -69,8 +99,11 @@ export interface InitControllerArgs {
   payer: PublicKey;
   dwallet: PublicKey;
   passkeyPubkey: Uint8Array; // 33-byte compressed P-256
+  secp256r1IxIndex: number;  // index of the verify ix over buildInitMessage()
 }
 
+// `owner` must be the dWallet's current authority. Move the dWallet authority
+// to this program's CPI authority only after the controller exists.
 export function buildInitControllerIx(args: InitControllerArgs): TransactionInstruction {
   const [controller, bump] = findControllerAddress(args.owner);
   if (args.passkeyPubkey.length !== 33) {
@@ -80,6 +113,7 @@ export function buildInitControllerIx(args: InitControllerArgs): TransactionInst
     Buffer.from([0]), // discriminator: InitController
     Buffer.from(args.passkeyPubkey),
     Buffer.from([bump]),
+    Buffer.from([args.secp256r1IxIndex]),
   ]);
   return new TransactionInstruction({
     programId: PASSKEY_CONTROLLER_PROGRAM_ID,
@@ -89,6 +123,7 @@ export function buildInitControllerIx(args: InitControllerArgs): TransactionInst
       { pubkey: args.owner, isSigner: true, isWritable: false },
       { pubkey: args.payer, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
     ],
     data,
   });
@@ -113,11 +148,13 @@ export function buildRequestSignIx(args: RequestSignArgs): TransactionInstructio
   if (args.messageDigest.length !== 32) throw new Error("digest must be 32 bytes");
   if (args.userPubkey.length !== 32) throw new Error("user pubkey must be 32 bytes");
 
+  const scheme = Buffer.alloc(2);
+  scheme.writeUInt16LE(args.signatureScheme, 0);
   const data = Buffer.concat([
     Buffer.from([1]), // discriminator: RequestSign
     Buffer.from(args.messageDigest),
     Buffer.from(args.userPubkey),
-    Buffer.from(new Uint16Array([args.signatureScheme]).buffer),
+    scheme,
     Buffer.from([args.messageApprovalBump]),
     Buffer.from([args.cpiAuthorityBump]),
     Buffer.from([args.secp256r1IxIndex]),
@@ -164,7 +201,7 @@ const CURRENT_IX_SENTINEL = 0xffff;
 export function buildSecp256r1VerifyIx(args: {
   passkeyPubkey: Uint8Array; // 33 bytes (compressed P-256)
   signature: Uint8Array;     // 64 bytes (r||s, big-endian)
-  message: Uint8Array;       // arbitrary; we pass the 32-byte digest
+  message: Uint8Array;       // buildInitMessage() or buildSignMessage()
 }): TransactionInstruction {
   if (args.passkeyPubkey.length !== SECP256R1_PUBKEY_LEN) {
     throw new Error("passkeyPubkey must be 33-byte compressed P-256");
@@ -204,13 +241,14 @@ export function buildSecp256r1VerifyIx(args: {
 // ── Compose a passkey-signed approval tx ──
 //
 // Returns a Transaction containing two instructions, in order:
-//   [0] secp256r1 verify ix (proves the registered passkey signed `digest`)
+//   [0] secp256r1 verify ix (proves the registered passkey signed
+//       buildSignMessage(): digest, user pubkey, scheme and dWallet)
 //   [1] request_sign ix     (introspects [0], CPI-approves the message on Ika)
 //
 // Caller is responsible for:
 //   - Obtaining the WebAuthn assertion (mobile/native), extracting the 64-byte
 //     P-256 signature (r||s, big-endian)
-//   - Hashing the WebAuthn challenge → 32-byte `digest`
+//   - Having the passkey sign buildSignMessage() for this approval
 //   - Submitting + waiting for confirmation, then polling Ika network for the
 //     dWallet-produced ECDSA sig (use `@ika.xyz/sdk` — see Seedless main-app
 //     `src/ika/client.ts` for the SuiJsonRpcClient + testnet pattern)
@@ -225,7 +263,7 @@ export interface ComposePasskeySignTxArgs {
   cpiAuthority: PublicKey;
   cpiAuthorityBump: number;
   passkeyPubkey: Uint8Array;     // 33-byte compressed P-256
-  passkeySignature: Uint8Array;  // 64 bytes (r||s)
+  passkeySignature: Uint8Array;  // 64 bytes (r||s) over buildSignMessage()
   userPubkey: Uint8Array;        // 32 bytes — Ika user pubkey for the dWallet
   digest: Uint8Array;            // 32 bytes — the message being approved
   signatureScheme: number;       // u16 — Ika signature scheme tag
@@ -239,7 +277,12 @@ export function composePasskeySignTx(args: ComposePasskeySignTxArgs): Transactio
   const verifyIx = buildSecp256r1VerifyIx({
     passkeyPubkey: args.passkeyPubkey,
     signature: args.passkeySignature,
-    message: args.digest,
+    message: buildSignMessage({
+      digest: args.digest,
+      userPubkey: args.userPubkey,
+      signatureScheme: args.signatureScheme,
+      dwallet: args.dwallet,
+    }),
   });
 
   const requestSignIx = buildRequestSignIx({
@@ -258,4 +301,30 @@ export function composePasskeySignTx(args: ComposePasskeySignTxArgs): Transactio
   });
 
   return new Transaction().add(verifyIx, requestSignIx);
+}
+
+// ── Compose a controller registration tx ──
+//
+//   [0] secp256r1 verify ix (the passkey signs buildInitMessage(owner, dwallet))
+//   [1] init_controller ix  (introspects [0], checks owner is the dWallet authority)
+export function composeInitControllerTx(args: {
+  owner: PublicKey;
+  payer: PublicKey;
+  dwallet: PublicKey;
+  passkeyPubkey: Uint8Array;    // 33-byte compressed P-256
+  passkeySignature: Uint8Array; // 64 bytes (r||s) over buildInitMessage()
+}): Transaction {
+  const verifyIx = buildSecp256r1VerifyIx({
+    passkeyPubkey: args.passkeyPubkey,
+    signature: args.passkeySignature,
+    message: buildInitMessage(args.owner, args.dwallet),
+  });
+  const initIx = buildInitControllerIx({
+    owner: args.owner,
+    payer: args.payer,
+    dwallet: args.dwallet,
+    passkeyPubkey: args.passkeyPubkey,
+    secp256r1IxIndex: 0,
+  });
+  return new Transaction().add(verifyIx, initIx);
 }

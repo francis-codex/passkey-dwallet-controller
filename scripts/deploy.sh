@@ -7,14 +7,20 @@ cd "$(dirname "$0")/.."
 
 # 1. Build the SBF program.
 echo "▶︎ Building program..."
-cargo build-sbf --manifest-path programs/passkey-dwallet-controller/Cargo.toml
+# Pinned: platform-tools v1.57 fails to link this no_std program, and SBPF v0
+# is the arch the Mollusk tests load.
+cargo build-sbf --tools-version v1.54 --arch v0 \
+  --manifest-path programs/passkey-dwallet-controller/Cargo.toml
 
 PROGRAM_SO=target/deploy/passkey_dwallet_controller.so
 KEYPAIR=target/deploy/passkey_dwallet_controller-keypair.json
 
 if [ ! -f "$KEYPAIR" ]; then
   echo "▶︎ Generating program keypair..."
-  solana-keygen new --no-bip39-passphrase -o "$KEYPAIR"
+  # Prompts for a BIP39 passphrase. This key is the program's upgrade identity:
+  # keep it out of the repo and back it up.
+  solana-keygen new -o "$KEYPAIR"
+  chmod 600 "$KEYPAIR"
 fi
 
 PROGRAM_ID=$(solana-keygen pubkey "$KEYPAIR")
