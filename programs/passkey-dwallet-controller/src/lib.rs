@@ -29,7 +29,7 @@ use pinocchio::{
     error::ProgramError,
     AccountView, Address, ProgramResult,
 };
-use pinocchio_system::instructions::CreateAccount;
+use pinocchio_system::instructions::{Allocate, Assign, CreateAccount, Transfer};
 
 entrypoint!(process_instruction);
 pinocchio::nostd_panic_handler!();
@@ -124,11 +124,19 @@ pub fn process_instruction(
 /// proves the key is a real P-256 point the registrant controls. Hand the
 /// dWallet authority to this program's CPI authority only after this ix.
 ///
+/// There is one controller per dWallet. While the dWallet's authority is
+/// still a wallet, that authority can call this again to replace the
+/// binding, so a controller left behind by an earlier owner never outlives a
+/// change of hands. Once the authority is this program's CPI authority, no
+/// signer matches it and the binding is fixed. A controller PDA that someone
+/// pre-funded is still claimed (top up, allocate, assign) instead of failing
+/// `CreateAccount`.
+///
 /// # Instruction Data
 /// `[passkey_pubkey(33), bump(1), secp256r1_ix_index(1)]` = 35 bytes
 ///
 /// # Accounts
-/// 0. `[writable]`         Controller PDA (seeds: `["controller", owner]`)
+/// 0. `[writable]`         Controller PDA (seeds: `["controller", dwallet]`)
 /// 1. `[readonly]`         dWallet account (owned by the Ika dWallet program)
 /// 2. `[signer]`           Owner (the dWallet's current authority)
 /// 3. `[writable, signer]` Payer
@@ -171,10 +179,11 @@ fn init_controller(
         return Err(ProgramError::InvalidInstructionData);
     }
 
-    // Controller must be the canonical PDA for this owner.
+    // Controller must be the canonical PDA for this dWallet.
     let owner_key = owner.address().as_array();
+    let dwallet_key = dwallet.address().as_array();
     let (expected_controller, canonical_bump) =
-        Address::find_program_address(&[b"controller", owner_key.as_ref()], program_id);
+        Address::find_program_address(&[b"controller", dwallet_key.as_ref()], program_id);
     if controller_account.address().as_array() != expected_controller.as_array()
         || bump != canonical_bump
     {
@@ -210,19 +219,40 @@ fn init_controller(
     let bump_byte = [bump];
     let signer_seeds = [
         Seed::from(b"controller" as &[u8]),
-        Seed::from(owner_key.as_ref()),
+        Seed::from(dwallet_key.as_ref()),
         Seed::from(bump_byte.as_ref()),
     ];
-    let signer = Signer::from(&signer_seeds);
+    let rent = minimum_balance(CONTROLLER_LEN);
 
-    CreateAccount {
-        from: payer,
-        to: controller_account,
-        lamports: minimum_balance(CONTROLLER_LEN),
-        space: CONTROLLER_LEN as u64,
-        owner: program_id,
+    if controller_account.owned_by(program_id) {
+        // Re-registration by the dWallet's current authority: overwrite.
+        if controller_account.data_len() != CONTROLLER_LEN {
+            return Err(ProgramError::InvalidAccountData);
+        }
+    } else if !controller_account.owned_by(&SYSTEM_PROGRAM_ID)
+        || controller_account.data_len() != 0
+    {
+        return Err(ProgramError::AccountAlreadyInitialized);
+    } else if controller_account.lamports() == 0 {
+        CreateAccount {
+            from: payer,
+            to: controller_account,
+            lamports: rent,
+            space: CONTROLLER_LEN as u64,
+            owner: program_id,
+        }
+        .invoke_signed(&[Signer::from(&signer_seeds)])?;
+    } else {
+        // Someone sent lamports to the PDA first; CreateAccount would fail.
+        let have = controller_account.lamports();
+        if have < rent {
+            Transfer { from: payer, to: controller_account, lamports: rent - have }.invoke()?;
+        }
+        Allocate { account: controller_account, space: CONTROLLER_LEN as u64 }
+            .invoke_signed(&[Signer::from(&signer_seeds)])?;
+        Assign { account: controller_account, owner: program_id }
+            .invoke_signed(&[Signer::from(&signer_seeds)])?;
     }
-    .invoke_signed(&[signer])?;
 
     let ctrl_data = unsafe { controller_account.borrow_unchecked_mut() };
     ctrl_data[0] = CONTROLLER_DISCRIMINATOR;
@@ -230,8 +260,7 @@ fn init_controller(
     ctrl_data[CTRL_OWNER..CTRL_OWNER + 32].copy_from_slice(owner_key);
     ctrl_data[CTRL_PASSKEY_PUBKEY..CTRL_PASSKEY_PUBKEY + 33]
         .copy_from_slice(&passkey_pubkey);
-    ctrl_data[CTRL_DWALLET..CTRL_DWALLET + 32]
-        .copy_from_slice(dwallet.address().as_array());
+    ctrl_data[CTRL_DWALLET..CTRL_DWALLET + 32].copy_from_slice(dwallet_key);
     ctrl_data[CTRL_BUMP] = bump;
 
     Ok(())
@@ -241,7 +270,7 @@ fn init_controller(
 /// attests the registered passkey signed
 /// `message_digest || user_pubkey || signature_scheme || dwallet`.
 ///
-/// The controller must be this program's canonical PDA for its stored owner,
+/// The controller must be this program's canonical PDA for its stored dWallet,
 /// and the dWallet must be the one it was registered with, so a controller
 /// can only ever approve for its own dWallet.
 ///
@@ -298,7 +327,7 @@ fn request_sign(
     let secp256r1_ix_index = data[68];
 
     // Controller: owned by this program, right shape, and the canonical PDA
-    // for the owner it stores.
+    // for the dWallet it stores.
     if !controller_account.owned_by(program_id) {
         return Err(ProgramError::IllegalOwner);
     }
@@ -313,7 +342,7 @@ fn request_sign(
             return Err(ProgramError::InvalidAccountData);
         }
         let (expected_controller, _) = Address::find_program_address(
-            &[b"controller", &ctrl_data[CTRL_OWNER..CTRL_OWNER + 32]],
+            &[b"controller", &ctrl_data[CTRL_DWALLET..CTRL_DWALLET + 32]],
             program_id,
         );
         if controller_account.address().as_array() != expected_controller.as_array() {

@@ -50,9 +50,9 @@ export const CPI_AUTHORITY_SEED = Buffer.from("__ika_cpi_authority");
 
 // ── PDA helpers ──
 
-export function findControllerAddress(owner: PublicKey): [PublicKey, number] {
+export function findControllerAddress(dwallet: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("controller"), owner.toBuffer()],
+    [Buffer.from("controller"), dwallet.toBuffer()],
     PASSKEY_CONTROLLER_PROGRAM_ID,
   );
 }
@@ -105,7 +105,7 @@ export interface InitControllerArgs {
 // `owner` must be the dWallet's current authority. Move the dWallet authority
 // to this program's CPI authority only after the controller exists.
 export function buildInitControllerIx(args: InitControllerArgs): TransactionInstruction {
-  const [controller, bump] = findControllerAddress(args.owner);
+  const [controller, bump] = findControllerAddress(args.dwallet);
   if (args.passkeyPubkey.length !== 33) {
     throw new Error("passkey pubkey must be 33-byte compressed P-256");
   }
@@ -272,7 +272,7 @@ export interface ComposePasskeySignTxArgs {
 export function composePasskeySignTx(args: ComposePasskeySignTxArgs): Transaction {
   if (args.digest.length !== 32) throw new Error("digest must be 32 bytes");
 
-  const [controller] = findControllerAddress(args.owner);
+  const [controller] = findControllerAddress(args.dwallet);
 
   const verifyIx = buildSecp256r1VerifyIx({
     passkeyPubkey: args.passkeyPubkey,
