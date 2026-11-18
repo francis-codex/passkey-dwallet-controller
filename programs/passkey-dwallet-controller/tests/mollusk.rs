@@ -36,8 +36,8 @@ use {
 };
 
 const PROGRAM_ID: [u8; 32] = [
-    43, 241, 175, 243, 63, 238, 86, 41, 119, 27, 213, 201, 61, 104, 176, 106,
-    32, 6, 177, 60, 198, 181, 58, 7, 210, 52, 113, 162, 29, 36, 141, 7,
+    43, 241, 175, 243, 63, 238, 86, 41, 119, 27, 213, 201, 61, 104, 176, 106, 32, 6, 177, 60, 198,
+    181, 58, 7, 210, 52, 113, 162, 29, 36, 141, 7,
 ];
 const CPI_AUTHORITY_SEED: &[u8] = b"__ika_cpi_authority";
 const CONTROLLER_LEN: usize = 116;
@@ -76,13 +76,25 @@ fn passkey(seed: u8) -> [u8; 33] {
 fn secp_ix(pubkey: &[u8; 33], message: &[u8]) -> Instruction {
     let (sig_off, pk_off, msg_off) = (16u16, 80u16, 113u16);
     let mut data = vec![1u8, 0];
-    for v in [sig_off, u16::MAX, pk_off, u16::MAX, msg_off, message.len() as u16, u16::MAX] {
+    for v in [
+        sig_off,
+        u16::MAX,
+        pk_off,
+        u16::MAX,
+        msg_off,
+        message.len() as u16,
+        u16::MAX,
+    ] {
         data.extend_from_slice(&v.to_le_bytes());
     }
     data.extend_from_slice(&[7u8; 64]);
     data.extend_from_slice(pubkey);
     data.extend_from_slice(message);
-    Instruction { program_id: secp(), accounts: vec![], data }
+    Instruction {
+        program_id: secp(),
+        accounts: vec![],
+        data,
+    }
 }
 
 fn sysvar_account(ixs: &[Instruction]) -> (Pubkey, Account) {
@@ -94,11 +106,19 @@ fn dwallet_account(authority: &Pubkey, owner: &Pubkey) -> Account {
     let mut data = vec![0u8; 64];
     data[0] = 2;
     data[2..34].copy_from_slice(authority.as_ref());
-    Account { lamports: 1_000_000, data, owner: *owner, ..Account::default() }
+    Account {
+        lamports: 1_000_000,
+        data,
+        owner: *owner,
+        ..Account::default()
+    }
 }
 
 fn funded() -> Account {
-    Account { lamports: 10_000_000_000, ..Account::default() }
+    Account {
+        lamports: 10_000_000_000,
+        ..Account::default()
+    }
 }
 
 // ── init_controller ──────────────────────────────────────────────────────
@@ -192,7 +212,10 @@ fn init_controller_happy_path() {
 fn init_claims_a_prefunded_controller_pda() {
     // byfor8 NEW-3: dust sent to the PDA first must not block registration.
     let mut t = Init::new();
-    t.controller_state = Account { lamports: 1, ..Account::default() };
+    t.controller_state = Account {
+        lamports: 1,
+        ..Account::default()
+    };
     let res = t.run();
     assert_eq!(res.raw_result, Ok(()));
     let ctrl = res.get_account(&t.controller).expect("controller");
@@ -214,7 +237,12 @@ fn init_lets_the_new_authority_replace_a_stale_controller() {
     stale[34..67].copy_from_slice(&passkey(3));
     stale[67..99].copy_from_slice(t.dwallet.as_ref());
     stale[99] = t.bump;
-    t.controller_state = Account { lamports: 2_000_000, data: stale, owner: program_id(), ..Account::default() };
+    t.controller_state = Account {
+        lamports: 2_000_000,
+        data: stale,
+        owner: program_id(),
+        ..Account::default()
+    };
     let res = t.run();
     assert_eq!(res.raw_result, Ok(()));
     let ctrl = res.get_account(&t.controller).expect("controller");
@@ -225,22 +253,36 @@ fn init_lets_the_new_authority_replace_a_stale_controller() {
 #[test]
 fn init_rejects_an_account_owned_by_another_program() {
     let mut t = Init::new();
-    t.controller_state = Account { lamports: 1, data: vec![0; 8], owner: Pubkey::new_unique(), ..Account::default() };
-    assert_eq!(t.run().raw_result, Err(InstructionError::AccountAlreadyInitialized));
+    t.controller_state = Account {
+        lamports: 1,
+        data: vec![0; 8],
+        owner: Pubkey::new_unique(),
+        ..Account::default()
+    };
+    assert_eq!(
+        t.run().raw_result,
+        Err(InstructionError::AccountAlreadyInitialized)
+    );
 }
 
 #[test]
 fn init_rejects_missing_owner_signature() {
     let mut t = Init::new();
     t.owner_signs = false;
-    assert_eq!(t.run().raw_result, Err(InstructionError::MissingRequiredSignature));
+    assert_eq!(
+        t.run().raw_result,
+        Err(InstructionError::MissingRequiredSignature)
+    );
 }
 
 #[test]
 fn init_rejects_bad_passkey_prefix() {
     let mut t = Init::new();
     t.passkey[0] = 0x04;
-    assert_eq!(t.run().raw_result, Err(InstructionError::InvalidInstructionData));
+    assert_eq!(
+        t.run().raw_result,
+        Err(InstructionError::InvalidInstructionData)
+    );
 }
 
 #[test]
@@ -306,10 +348,20 @@ fn controller_account(owner: &Pubkey, dwallet: &Pubkey, bump: u8, program: &Pubk
     data[34..67].copy_from_slice(&passkey(9));
     data[67..99].copy_from_slice(dwallet.as_ref());
     data[99] = bump;
-    Account { lamports: 2_000_000, data, owner: *program, ..Account::default() }
+    Account {
+        lamports: 2_000_000,
+        data,
+        owner: *program,
+        ..Account::default()
+    }
 }
 
-fn sign_message(digest: &[u8; 32], user_pubkey: &[u8; 32], scheme: u16, dwallet: &Pubkey) -> Vec<u8> {
+fn sign_message(
+    digest: &[u8; 32],
+    user_pubkey: &[u8; 32],
+    scheme: u16,
+    dwallet: &Pubkey,
+) -> Vec<u8> {
     let mut m = digest.to_vec();
     m.extend_from_slice(user_pubkey);
     m.extend_from_slice(&scheme.to_le_bytes());
@@ -353,8 +405,11 @@ impl Sign {
         data.push(self.cpi_bump);
         data.push(0); // secp256r1 ix index
         let (system_id, system_account) = keyed_account_for_system_program();
-        let (coordinator, approval, payer) =
-            (Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique());
+        let (coordinator, approval, payer) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
         let ix = Instruction {
             program_id: program_id(),
             accounts: vec![
@@ -389,7 +444,13 @@ impl Sign {
         if self.dwallet_program != ika() {
             accounts.push((self.dwallet_program, Account::default()));
         } else {
-            accounts.push((ika(), Account { executable: true, ..Account::default() }));
+            accounts.push((
+                ika(),
+                Account {
+                    executable: true,
+                    ..Account::default()
+                },
+            ));
         }
         mollusk().process_instruction(&ix, &accounts)
     }
@@ -408,7 +469,10 @@ fn sign_rejects_legacy_v1_controller() {
     // otherwise byte-identical; it must not survive an in-place upgrade.
     let mut t = Sign::new();
     t.controller_account.data[1] = 1;
-    assert_eq!(t.run().raw_result, Err(InstructionError::InvalidAccountData));
+    assert_eq!(
+        t.run().raw_result,
+        Err(InstructionError::InvalidAccountData)
+    );
 }
 
 #[test]
@@ -436,7 +500,10 @@ fn sign_rejects_registered_dwallet_not_owned_by_ika() {
 fn sign_rejects_wrong_ika_program() {
     let mut t = Sign::new();
     t.dwallet_program = Pubkey::new_unique();
-    assert_eq!(t.run().raw_result, Err(InstructionError::IncorrectProgramId));
+    assert_eq!(
+        t.run().raw_result,
+        Err(InstructionError::IncorrectProgramId)
+    );
 }
 
 #[test]
@@ -486,7 +553,10 @@ fn sign_rejects_bare_digest_proof() {
     // The pre-fix layout: the passkey signs the digest alone.
     let mut t = Sign::new();
     t.proof_message = t.digest.to_vec();
-    assert_eq!(t.run().raw_result, Err(InstructionError::InvalidInstructionData));
+    assert_eq!(
+        t.run().raw_result,
+        Err(InstructionError::InvalidInstructionData)
+    );
 }
 
 #[test]

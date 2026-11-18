@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/seedless-labs/passkey-dwallet-controller/security/advisories/new
+    about: Report vulnerabilities privately, never in a public issue.
+  - name: Questions and community
+    url: https://t.me/seedless_users
+    about: Ask on Telegram.
