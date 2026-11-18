@@ -4,7 +4,7 @@ Thanks for helping out. Issues and pull requests are welcome.
 
 ## Setup
 
-1. Clone this repo, and clone [ika-pre-alpha](https://github.com/dwallet-labs) to `../Code/ika-pre-alpha`. The Ika crates are path dependencies in `Cargo.toml`.
+1. Clone this repo, and clone [ika-pre-alpha](https://github.com/dwallet-labs/ika-pre-alpha) to `../Code/ika-pre-alpha`. The Ika crates are path dependencies in `Cargo.toml`.
 2. Install Solana platform-tools v1.54 (see the README for why the version is pinned).
 3. Build and test:
 

@@ -29,7 +29,7 @@ cd passkey-dwallet-controller
 cd client && npm ci && npm run typecheck   # TypeScript client, no Solana tooling needed
 ```
 
-To build the program you also need [ika-pre-alpha](https://github.com/dwallet-labs) cloned at `../Code/ika-pre-alpha` and Solana platform-tools v1.54. See [Build & deploy](#build--deploy).
+To build the program you also need [ika-pre-alpha](https://github.com/dwallet-labs/ika-pre-alpha) cloned at `../Code/ika-pre-alpha` and Solana platform-tools v1.54. See [Build & deploy](#build--deploy).
 
 ## How it works
 
