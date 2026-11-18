@@ -21,6 +21,16 @@ PasskeyDWalletController is that authority. It's the missing piece between a mob
 
 ---
 
+## Quickstart
+
+```bash
+git clone https://github.com/seedless-labs/passkey-dwallet-controller
+cd passkey-dwallet-controller
+cd client && npm ci && npm run typecheck   # TypeScript client, no Solana tooling needed
+```
+
+To build the program you also need [ika-pre-alpha](https://github.com/dwallet-labs/ika-pre-alpha) cloned at `../Code/ika-pre-alpha` and Solana platform-tools v1.54. See [Build & deploy](#build--deploy).
+
 ## How it works
 
 ```
@@ -183,3 +193,21 @@ The Solana runtime aborts the transaction if the secp256r1 precompile itself rep
 - **Mobile e2e on devnet.** Wire the Seedless React Native client to broadcast `composePasskeySignTx`, poll Ika, and submit the resulting ECDSA signature to Sepolia. The pieces are in place; the work is gluing them together.
 - **Mollusk coverage.** `init_controller` has a happy path and its reject paths; `request_sign` has every reject path. Still open: the `request_sign` happy path through the Ika `approve_message` CPI (needs the Ika program binary) and real secp256r1 precompile verification (Mollusk runs one instruction, so the sibling ix is parsed, not verified).
 - **Mainnet.** When Ika ships a mainnet-ready Solana coordinator, this program is the bridge for every Seedless user.
+
+---
+
+## Community
+
+- Questions: [discussions](https://github.com/seedless-labs/passkey-dwallet-controller/discussions) or [Telegram](https://t.me/seedless_users)
+- Updates: [@seedlesslabs](https://x.com/seedlesslabs) on X
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+
+## Links
+
+- Website: [seedlesslabs.xyz](https://www.seedlesslabs.xyz)
+- Developers: [seedlesslabs.xyz/developers](https://www.seedlesslabs.xyz/developers)
+- All open-source work: [github.com/seedless-labs](https://github.com/seedless-labs)
+
+## License
+
+MIT. See [LICENSE](LICENSE).
