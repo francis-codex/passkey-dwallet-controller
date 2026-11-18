@@ -36,8 +36,8 @@ pinocchio::nostd_panic_handler!();
 
 // Deployed on Solana devnet: 3xYHGYP24wH75tB1U3tn2RoQHcgZLkjuWTT4snWbv9zv
 pub const ID: Address = Address::new_from_array([
-    43, 241, 175, 243, 63, 238, 86, 41, 119, 27, 213, 201, 61, 104, 176, 106,
-    32, 6, 177, 60, 198, 181, 58, 7, 210, 52, 113, 162, 29, 36, 141, 7,
+    43, 241, 175, 243, 63, 238, 86, 41, 119, 27, 213, 201, 61, 104, 176, 106, 32, 6, 177, 60, 198,
+    181, 58, 7, 210, 52, 113, 162, 29, 36, 141, 7,
 ]);
 
 // ── Discriminators ──
@@ -60,20 +60,20 @@ const CTRL_BUMP: usize = 99;
 
 /// Solana secp256r1 native precompile — `Secp256r1SigVerify1111111111111111111111111`.
 pub const SECP256R1_PROGRAM_ID: Address = Address::new_from_array([
-    6, 146, 13, 236, 47, 234, 113, 181, 183, 35, 129, 77, 116, 45, 169, 3,
-    28, 131, 231, 95, 219, 121, 93, 86, 142, 117, 71, 128, 32, 0, 0, 0,
+    6, 146, 13, 236, 47, 234, 113, 181, 183, 35, 129, 77, 116, 45, 169, 3, 28, 131, 231, 95, 219,
+    121, 93, 86, 142, 117, 71, 128, 32, 0, 0, 0,
 ]);
 
 /// Sysvar Instructions account — `Sysvar1nstructions1111111111111111111111111`.
 pub const INSTRUCTIONS_SYSVAR_ID: Address = Address::new_from_array([
-    6, 167, 213, 23, 24, 123, 209, 102, 53, 218, 212, 4, 85, 253, 194, 192,
-    193, 36, 198, 143, 33, 86, 117, 165, 219, 186, 203, 95, 8, 0, 0, 0,
+    6, 167, 213, 23, 24, 123, 209, 102, 53, 218, 212, 4, 85, 253, 194, 192, 193, 36, 198, 143, 33,
+    86, 117, 165, 219, 186, 203, 95, 8, 0, 0, 0,
 ]);
 
 /// Ika dWallet program: `87W54kGYFQ1rgWqMeu4XTPHWXWmXSQCcjm8vCTfiq1oY`.
 pub const IKA_DWALLET_PROGRAM_ID: Address = Address::new_from_array([
-    105, 172, 41, 185, 50, 32, 159, 61, 21, 16, 154, 74, 112, 129, 218, 65,
-    5, 104, 52, 48, 240, 90, 178, 50, 121, 140, 177, 1, 215, 36, 144, 91,
+    105, 172, 41, 185, 50, 32, 159, 61, 21, 16, 154, 74, 112, 129, 218, 65, 5, 104, 52, 48, 240,
+    90, 178, 50, 121, 140, 177, 1, 215, 36, 144, 91,
 ]);
 
 /// System program: `11111111111111111111111111111111`.
@@ -142,11 +142,7 @@ pub fn process_instruction(
 /// 3. `[writable, signer]` Payer
 /// 4. `[readonly]`         System program
 /// 5. `[readonly]`         Sysvar instructions account
-fn init_controller(
-    program_id: &Address,
-    accounts: &[AccountView],
-    data: &[u8],
-) -> ProgramResult {
+fn init_controller(program_id: &Address, accounts: &[AccountView], data: &[u8]) -> ProgramResult {
     if data.len() < 35 {
         return Err(ProgramError::InvalidInstructionData);
     }
@@ -229,8 +225,7 @@ fn init_controller(
         if controller_account.data_len() != CONTROLLER_LEN {
             return Err(ProgramError::InvalidAccountData);
         }
-    } else if !controller_account.owned_by(&SYSTEM_PROGRAM_ID)
-        || controller_account.data_len() != 0
+    } else if !controller_account.owned_by(&SYSTEM_PROGRAM_ID) || controller_account.data_len() != 0
     {
         return Err(ProgramError::AccountAlreadyInitialized);
     } else if controller_account.lamports() == 0 {
@@ -246,20 +241,30 @@ fn init_controller(
         // Someone sent lamports to the PDA first; CreateAccount would fail.
         let have = controller_account.lamports();
         if have < rent {
-            Transfer { from: payer, to: controller_account, lamports: rent - have }.invoke()?;
+            Transfer {
+                from: payer,
+                to: controller_account,
+                lamports: rent - have,
+            }
+            .invoke()?;
         }
-        Allocate { account: controller_account, space: CONTROLLER_LEN as u64 }
-            .invoke_signed(&[Signer::from(&signer_seeds)])?;
-        Assign { account: controller_account, owner: program_id }
-            .invoke_signed(&[Signer::from(&signer_seeds)])?;
+        Allocate {
+            account: controller_account,
+            space: CONTROLLER_LEN as u64,
+        }
+        .invoke_signed(&[Signer::from(&signer_seeds)])?;
+        Assign {
+            account: controller_account,
+            owner: program_id,
+        }
+        .invoke_signed(&[Signer::from(&signer_seeds)])?;
     }
 
     let ctrl_data = unsafe { controller_account.borrow_unchecked_mut() };
     ctrl_data[0] = CONTROLLER_DISCRIMINATOR;
     ctrl_data[1] = CONTROLLER_VERSION;
     ctrl_data[CTRL_OWNER..CTRL_OWNER + 32].copy_from_slice(owner_key);
-    ctrl_data[CTRL_PASSKEY_PUBKEY..CTRL_PASSKEY_PUBKEY + 33]
-        .copy_from_slice(&passkey_pubkey);
+    ctrl_data[CTRL_PASSKEY_PUBKEY..CTRL_PASSKEY_PUBKEY + 33].copy_from_slice(&passkey_pubkey);
     ctrl_data[CTRL_DWALLET..CTRL_DWALLET + 32].copy_from_slice(dwallet_key);
     ctrl_data[CTRL_BUMP] = bump;
 
@@ -290,11 +295,7 @@ fn init_controller(
 /// 7. `[readonly]`         This program account (caller_program for CPI)
 /// 8. `[readonly]`         CPI authority PDA
 /// 9. `[readonly]`         dWallet program
-fn request_sign(
-    program_id: &Address,
-    accounts: &[AccountView],
-    data: &[u8],
-) -> ProgramResult {
+fn request_sign(program_id: &Address, accounts: &[AccountView], data: &[u8]) -> ProgramResult {
     if data.len() < 69 {
         return Err(ProgramError::InvalidInstructionData);
     }
@@ -302,16 +303,16 @@ fn request_sign(
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
-    let controller_account     = &accounts[0];
-    let sysvar_instructions    = &accounts[1];
-    let coordinator            = &accounts[2];
-    let message_approval       = &accounts[3];
-    let dwallet                = &accounts[4];
-    let payer                  = &accounts[5];
-    let system_program         = &accounts[6];
-    let caller_program         = &accounts[7];
-    let cpi_authority          = &accounts[8];
-    let dwallet_program        = &accounts[9];
+    let controller_account = &accounts[0];
+    let sysvar_instructions = &accounts[1];
+    let coordinator = &accounts[2];
+    let message_approval = &accounts[3];
+    let dwallet = &accounts[4];
+    let payer = &accounts[5];
+    let system_program = &accounts[6];
+    let caller_program = &accounts[7];
+    let cpi_authority = &accounts[8];
+    let dwallet_program = &accounts[9];
 
     let mut message_digest = [0u8; 32];
     message_digest.copy_from_slice(&data[0..32]);
