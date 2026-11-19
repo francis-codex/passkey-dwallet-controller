@@ -50,15 +50,15 @@ export const CPI_AUTHORITY_SEED = Buffer.from("__ika_cpi_authority");
 
 // ── PDA helpers ──
 
-export function findControllerAddress(dwallet: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("controller"), dwallet.toBuffer()],
+export async function findControllerAddress(dwallet: PublicKey): Promise<[PublicKey, number]> {
+  return PublicKey.findProgramAddress(
+    [Buffer.from("controller"), Buffer.from(dwallet.toBytes())],
     PASSKEY_CONTROLLER_PROGRAM_ID,
   );
 }
 
-export function findCpiAuthority(): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
+export async function findCpiAuthority(): Promise<[PublicKey, number]> {
+  return PublicKey.findProgramAddress(
     [CPI_AUTHORITY_SEED],
     PASSKEY_CONTROLLER_PROGRAM_ID,
   );
@@ -70,7 +70,7 @@ export function findCpiAuthority(): [PublicKey, number] {
 
 /** Registration: `INIT_DOMAIN || owner || dwallet` (95 bytes). */
 export function buildInitMessage(owner: PublicKey, dwallet: PublicKey): Buffer {
-  return Buffer.concat([INIT_DOMAIN, owner.toBuffer(), dwallet.toBuffer()]);
+  return Buffer.concat([INIT_DOMAIN, Buffer.from(owner.toBytes()), Buffer.from(dwallet.toBytes())]);
 }
 
 /** Approval: `digest || userPubkey || signatureScheme(u16 LE) || dwallet` (98 bytes). */
@@ -88,7 +88,7 @@ export function buildSignMessage(args: {
     Buffer.from(args.digest),
     Buffer.from(args.userPubkey),
     scheme,
-    args.dwallet.toBuffer(),
+    Buffer.from(args.dwallet.toBytes()),
   ]);
 }
 
@@ -104,8 +104,8 @@ export interface InitControllerArgs {
 
 // `owner` must be the dWallet's current authority. Move the dWallet authority
 // to this program's CPI authority only after the controller exists.
-export function buildInitControllerIx(args: InitControllerArgs): TransactionInstruction {
-  const [controller, bump] = findControllerAddress(args.dwallet);
+export async function buildInitControllerIx(args: InitControllerArgs): Promise<TransactionInstruction> {
+  const [controller, bump] = await findControllerAddress(args.dwallet);
   if (args.passkeyPubkey.length !== 33) {
     throw new Error("passkey pubkey must be 33-byte compressed P-256");
   }
@@ -269,10 +269,10 @@ export interface ComposePasskeySignTxArgs {
   signatureScheme: number;       // u16 — Ika signature scheme tag
 }
 
-export function composePasskeySignTx(args: ComposePasskeySignTxArgs): Transaction {
+export async function composePasskeySignTx(args: ComposePasskeySignTxArgs): Promise<Transaction> {
   if (args.digest.length !== 32) throw new Error("digest must be 32 bytes");
 
-  const [controller] = findControllerAddress(args.dwallet);
+  const [controller] = await findControllerAddress(args.dwallet);
 
   const verifyIx = buildSecp256r1VerifyIx({
     passkeyPubkey: args.passkeyPubkey,
@@ -307,19 +307,19 @@ export function composePasskeySignTx(args: ComposePasskeySignTxArgs): Transactio
 //
 //   [0] secp256r1 verify ix (the passkey signs buildInitMessage(owner, dwallet))
 //   [1] init_controller ix  (introspects [0], checks owner is the dWallet authority)
-export function composeInitControllerTx(args: {
+export async function composeInitControllerTx(args: {
   owner: PublicKey;
   payer: PublicKey;
   dwallet: PublicKey;
   passkeyPubkey: Uint8Array;    // 33-byte compressed P-256
   passkeySignature: Uint8Array; // 64 bytes (r||s) over buildInitMessage()
-}): Transaction {
+}): Promise<Transaction> {
   const verifyIx = buildSecp256r1VerifyIx({
     passkeyPubkey: args.passkeyPubkey,
     signature: args.passkeySignature,
     message: buildInitMessage(args.owner, args.dwallet),
   });
-  const initIx = buildInitControllerIx({
+  const initIx = await buildInitControllerIx({
     owner: args.owner,
     payer: args.payer,
     dwallet: args.dwallet,

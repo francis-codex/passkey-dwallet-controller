@@ -150,7 +150,7 @@ The Seedless mobile app composes a single transaction containing two instruction
 ```ts
 import { composePasskeySignTx } from "passkey-dwallet-controller";
 
-const tx = composePasskeySignTx({
+const tx = await composePasskeySignTx({
   owner, payer, dwallet, coordinator,
   messageApproval, messageApprovalBump,
   cpiAuthority, cpiAuthorityBump,
