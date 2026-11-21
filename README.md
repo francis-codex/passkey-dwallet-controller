@@ -2,7 +2,7 @@
 
 The on-chain authority that lets a WebAuthn passkey hold an Ika MPC dWallet on Solana — and sign EVM transactions from one FaceID tap.
 
-Shipped by [Seedless](https://www.seedlesslabs.xyz/) — a private mainnet-beta passkey wallet on Solana. This program is the bridge our mobile app uses to sign cross-chain through Ika.
+Built by [Seedless](https://www.seedlesslabs.xyz/), a passkey wallet on Solana. **Status: devnet research prototype.** The Seedless app in the App Store and Google Play does not use this program; it is how we prototyped cross-chain signing through Ika, and it is not part of the launch app.
 
 - **Program ID (Solana devnet):** `3xYHGYP24wH75tB1U3tn2RoQHcgZLkjuWTT4snWbv9zv`
 - **Deploy tx:** [solscan](https://solscan.io/tx/2aNbhbwAFGa1YHfv3sQCnAWtmjw5yhcc5UTLMX7k3mF2egvA8PtWMrCKntNtH6GuWEt2vd2L3zAx8ZQigJK3kGmS?cluster=devnet)
@@ -145,7 +145,7 @@ cd client && npm install && npm run typecheck
 
 ## Integration with Seedless
 
-The Seedless mobile app composes a single transaction containing two instructions, in order:
+In the prototype, the Seedless mobile app composes a single transaction containing two instructions, in order:
 
 ```ts
 import { composePasskeySignTx } from "passkey-dwallet-controller";
@@ -162,7 +162,7 @@ const tx = await composePasskeySignTx({
 });
 ```
 
-The mobile app already integrates `@ika.xyz/sdk` via `SuiJsonRpcClient` for dWallet creation and signature polling — Sepolia tx [`0xb1bc9e14...`](https://sepolia.etherscan.io/tx/0xb1bc9e14ea17a0e23aedf76a7a1785596c18bd9bfe4bd66338f5778ba97989f4) confirmed on May 6. This program is what closes the loop: every signature the user authorizes flows through on-chain passkey verification before Ika's MPC quorum ever sees the request.
+A prototype build of the mobile app integrated `@ika.xyz/sdk` via `SuiJsonRpcClient` for dWallet creation and signature polling — Sepolia tx [`0xb1bc9e14...`](https://sepolia.etherscan.io/tx/0xb1bc9e14ea17a0e23aedf76a7a1785596c18bd9bfe4bd66338f5778ba97989f4) confirmed on May 6. This program is what closes the loop: every signature the user authorizes flows through on-chain passkey verification before Ika's MPC quorum ever sees the request.
 
 ---
 
