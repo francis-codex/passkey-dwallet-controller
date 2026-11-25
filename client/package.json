@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@ika.xyz/sdk": "*",
-    "@mysten/sui": "^2.39.1",
+    "@mysten/sui": "^3.0.1",
     "@solana/web3.js": "^3.2.1",
     "@solana/buffer-layout": "^4.0.1"
   },
